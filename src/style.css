@@ -1,0 +1,40 @@
+body {
+  position: absolute;
+  left: 0px;
+}
+
+.tocify-extend-page {
+  height: 0 !important;
+}
+
+@media print {
+  #TOC {
+    display: none;
+  }
+  .tab-pane {
+    display: block !important;
+    opacity: 1;
+  }
+  /* do not show tabset navigation */
+  ul.nav {
+    display: none !important;
+  }
+  /* show headers when printing */
+  .printhead {
+    display: block !important;
+    opacity 1 !important;
+  }
+  /* removes some white space to the left where the toc was*/
+  body {
+    position: absolute;
+    left: -250px;
+  }
+}
+
+/* dont show the headers on screens */
+@media screen {
+  .printhead {
+    display: none;
+    opacity: 0;
+  }
+}
