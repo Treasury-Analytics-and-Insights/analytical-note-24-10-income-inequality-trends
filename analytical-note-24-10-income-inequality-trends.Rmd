@@ -1,0 +1,2454 @@
+---
+title: "Analytical Note 24/10: Exploring trends in income inequality in New Zealand (2007 - 2023)"
+author: "Fergus Cleveland & Meghan Stephens"
+date: "2024-12-02"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    highlight: haddock
+    css: "src/style.css"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE, warning = FALSE, message = FALSE)
+
+library(data.table)
+library(ggplot2)
+library(patchwork)
+library(zoo)
+source("src/plot_theme.R")
+source("src/plotting_functions.R")
+
+household_table <- fread("data/household_type_inequality_table.csv")
+multiadult_table <- fread("data/multiadult_inequality_table.csv")
+multiadult_children_youngest_table <- fread("data/multiadult_children_youngest_inequality_table.csv")
+multiadult_children_oldest_table <- fread("data/multiadult_children_oldest_inequality_table.csv")
+cpi_region_table <- fread("data/cpi_region_inequality_table.csv")
+output_region_table <- fread("data/output_region_inequality_table.csv")
+senior_tables <- fread("data/senior_inequality_table.csv")
+all_senior_table <- senior_tables[Population_Table == "Senior Non-Senior"]
+senior_relationship_table <- senior_tables[Population_Table == "Senior Relationship"]
+senior_work_table <- senior_tables[Population_Table == "Senior Work"]
+senior_complete_table <- senior_tables[Population_Table == "Senior Work-Relationship"]
+
+household_table <- smooth_and_0(household_table)
+multiadult_table <- smooth_and_0(multiadult_table)
+multiadult_children_youngest_table <- smooth_and_0(multiadult_children_youngest_table)
+multiadult_children_oldest_table <- smooth_and_0(multiadult_children_oldest_table)
+cpi_region_table <- smooth_and_0(cpi_region_table)
+output_region_table <- smooth_and_0(output_region_table)
+all_senior_table <- smooth_and_0(all_senior_table)
+senior_relationship_table <- smooth_and_0(senior_relationship_table)
+senior_work_table <- smooth_and_0(senior_work_table)
+senior_complete_table <- smooth_and_0(senior_complete_table)
+
+cpi_regions <- fread("legends/cpi_region_codes.csv")
+cpi_regions[, ':='(Group = as.character(Group), Region_Name = Name, Name = NULL)]
+cpi_region_table <- merge(cpi_region_table, cpi_regions, by = "Group", all = TRUE)
+cpi_region_table[!(is.na(Region_Name)), ':='(Group = Region_Name)]
+cpi_region_list <- cpi_regions[, unique(Region_Name)]
+
+output_regions <- fread("legends/output_region_codes.csv")
+output_regions[Name == "Tasman / Nelson / Marlborough / West Coast region", Name := "Tasman / Nelson / Marlborough /\nWest Coast region"]
+output_regions[, ':='(Group = as.character(Group), Region_Name = Name, Name = NULL)]
+output_region_table <- merge(output_region_table, output_regions, by = "Group", all = TRUE)
+output_region_table[!(is.na(Region_Name)), ':='(Group = Region_Name)]
+output_region_list <- output_regions[, unique(Region_Name)]
+
+all_senior_table[Group == "Under 65", Group := "Non-senior"]
+all_senior_table[Group == "65+", Group := "Senior"]
+
+senior_relationship_table[Group == "Single Only", Group := "Senior single only"]
+senior_relationship_table[Group == "Couple Only", Group := "Senior couple only"]
+senior_relationship_table[Group == "Single with Adults", Group := "Senior single with other adults"]
+senior_relationship_table[Group == "Multi-couple/Couple with Adults", Group := "Senior couple with other adults"]
+
+senior_relationship_table[, Group := factor(Group, levels = c("Senior single only", 
+                                                              "Senior couple only", 
+                                                              "Senior single with other adults", 
+                                                              "Senior couple with other adults"))]
+
+senior_work_table[Group == "65+ Not Working", Group := "Senior not working"]
+senior_work_table[Group == "65+ Working", Group := "Senior working"]
+
+senior_complete_table[Group == "Single Only, 65+ Not Working", Group := "Senior single only,\nsenior not working"]
+senior_complete_table[Group == "Single Only, 65+ Working", Group := "Senior single only,\nsenior working"]
+senior_complete_table[Group == "Couple Only, 65+ Not Working", Group := "Senior couple only,\nsenior not working"]
+senior_complete_table[Group == "Couple Only, 65+ Working", Group := "Senior couple only,\nsenior working"]
+senior_complete_table[Group == "Single/Couple with Adults, 65+ Not Working", Group := "Senior single or couple\nwith other adults,\nsenior not working"]
+senior_complete_table[Group == "Single/Couple with Adults, 65+ Working", Group := "Senior single or couple\nwith other adults,\nsenior working"]
+
+senior_complete_table[, Group := factor(Group, levels = c("Senior single only,\nsenior not working", 
+                                                              "Senior single only,\nsenior working", 
+                                                              "Senior couple only,\nsenior not working", 
+                                                              "Senior couple only,\nsenior working",
+                                                              "Senior single or couple\nwith other adults,\nsenior not working",
+                                                              "Senior single or couple\nwith other adults,\nsenior working"))]
+
+srt_factors <- c("Senior single only", 
+  "Senior couple only", 
+  "Senior single with other adults",
+  "Senior couple with other adults")
+
+sca_factors <- c("Senior single only,\nsenior not working", 
+                                                              "Senior single only,\nsenior working", 
+                                                              "Senior couple only,\nsenior not working", 
+                                                              "Senior couple only,\nsenior working",
+                                                              "Senior single or couple\nwith other adults,\nsenior not working",
+                                                              "Senior single or couple\nwith other adults,\nsenior working")
+
+```
+
+This technical report provides plots and statistical results for an Analytical Note:
+https://www.treasury.govt.nz/publications/an/an-24-10
+
+The data used to create these plots are available in a GitHub repository:
+https://github.com/Treasury-Analytics-and-Insights/analytical-note-24-10-income-inequality-trends
+
+Staff and teams are writing in their individual capacity and the views are not necessarily a “Treasury” view. Please read our disclaimer:
+https://www.treasury.govt.nz/publications/research-and-commentary/other-paper-series-and-details/disclaimer-research-and-commentary-publications
+
+## Disclaimer
+These results are not official statistics. They have been created for research purposes from the Integrated Data Infrastructure (IDI) which is carefully managed by Stats NZ. For more information about the IDI please visit https://www.stats.govt.nz/integrated-data/.
+
+The results are based in part on tax data supplied by Inland Revenue to Stats NZ under the Tax Administration Act 1994 for statistical purposes. Any discussion of data limitations or weaknesses is in the context of using the IDI for statistical purposes, and is not related to the data’s ability to support Inland Revenue’s core operational requirements.
+
+## Trends - All Measures {.tabset}
+
+### Smoothed
+```{r all_measures_change_smooth}
+all_measures <- household_table[Variable %in% c("Theil", "Gini", "90/10 Ratio", "80/20 Ratio") & Group == "All"]
+all_measures[, Variable := factor(Variable, c("Gini", "Theil", "80/20 Ratio", "90/10 Ratio"))]
+
+plot_trends(all_measures)
+```
+
+### Unsmoothed
+```{r all_measures_change_unsmoothed}
+
+plot_trends_unsmoothed(all_measures)
+```
+
+### Combo
+```{r all_measures_change_combo}
+plot_trends_combo(all_measures)
+```
+
+## Trends - Individual Measures {.tabset}
+
+### Gini
+``` {r measures_gini}
+plot_measure(data = household_table, 
+             selected_variable = "Gini", 
+             plot_title = "Gini coefficient",
+             y_lims = c(0.29, 0.43),
+             y_seqs = seq(0.29, 0.43, .02),
+             line_color = tsy_palette[1])
+
+print("BHC Quadratic WLS")
+reg <- quad_WLS(data=household_table, reg_group="All", reg_variable="Gini", reg_income = "BHC", excluded_years = c(2022), middle_year = 2015)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("AHC Quadratic WLS")
+reg <- quad_WLS(data=household_table, reg_group="All", reg_variable="Gini", reg_income = "AHC", excluded_years = c(2022), middle_year = 2015)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+```
+
+### Theil
+``` {r measures_theil}
+plot_measure(data = household_table, 
+             selected_variable = "Theil", 
+             plot_title = "Theil index",
+            y_lims = c(0.14, 0.38),
+             y_seqs = seq(0.14, 0.38, 0.02),
+             line_color = tsy_palette[2])
+
+print("BHC Quadratic WLS")
+reg <- quad_WLS(data=household_table, reg_group="All", reg_variable="Theil", reg_income = "BHC", excluded_years = c(2022), middle_year = 2015)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("AHC Quadratic WLS")
+reg <- quad_WLS(data=household_table, reg_group="All", reg_variable="Theil", reg_income = "AHC", excluded_years = c(2022), middle_year = 2015)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+```
+
+### 80/20 Ratio
+``` {r measures_8020}
+plot_measure(data = household_table, 
+             selected_variable = "80/20 Ratio", 
+             plot_title = "80/20 ratio",
+             y_lims = c(2.4, 3.6),
+             y_seqs = seq(2.4, 3.6, 0.1),
+             line_color = tsy_palette[3])
+```
+
+### 90/10 Ratio
+``` {r measures_9010}
+plot_measure(data = household_table, 
+             selected_variable = "90/10 Ratio", 
+             plot_title = "90/10 ratio",
+             y_lims = c(3.5, 8.5),
+             y_seqs = seq(3.5, 8.5, 0.5),
+             line_color = tsy_palette[4])
+```
+
+### Mean Income
+``` {r measures_mean}
+plot_measure(data = household_table, 
+             selected_variable = "Mean", 
+             plot_title = "Mean HEDI",
+             y_lims = c(30000, 60000),
+             y_seqs = seq(30000, 60000, 5000),
+             line_color = tsy_palette[5])
+```
+
+### Median Income
+``` {r measures_median}
+plot_measure(data = household_table, 
+             selected_variable = "Median", 
+             plot_title = "Median HEDI",
+             y_lims = c(20000, 50000),
+             y_seqs = seq(20000, 50000, 5000),
+             line_color = tsy_palette[6])
+```
+
+### Total Income
+``` {r measures_total}
+plot_measure(data = household_table, 
+             selected_variable = "Total", 
+             plot_title = "Total HEDI over individuals",
+             y_lims = c(1.2*10**11, 2.8*10**11),
+             y_seqs = seq(1.2*10**11, 2.8*10**11, 0.2*10**11),
+             line_color = tsy_palette[7])
+```
+
+## Households
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r household_measures_gini_s}
+plot_measure_smoothed(data = household_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient",
+                      y_lims = c(0.24, 0.5),
+                      y_seqs = seq(0.24, 0.5, 0.02))
+
+```
+
+##### With Errors
+``` {r household_measures_gini_e}
+plot_measure_errors(data = household_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient",
+                      y_lims = c(0.2, 0.8),
+                      y_seqs = seq(0.2, 0.8, 0.05))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r household_measures_theil_s}
+plot_measure_smoothed(data = household_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index",
+                      y_lims = c(0.12, 0.51),
+                      y_seqs = seq(0.12, 0.51, 0.03))
+
+```
+
+##### With Errors
+``` {r household_measures_theil_e}
+plot_measure_errors(data = household_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index",
+                      y_lims = c(0, 1.5),
+                      y_seqs = seq(0, 1.5, 0.2))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r household_measures_8020_s}
+plot_measure_smoothed(data = household_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title = "80/20 ratio",
+                      y_lims = c(1, 9),
+                      y_seqs = seq(1, 9, 0.5))
+
+```
+
+##### With Errors
+``` {r household_measures_8020_e}
+plot_measure_errors(data = household_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title = "80/20 ratio",
+                      y_lims = c(-1, 13),
+                      y_seqs = seq(-1, 13, 1))
+print("Note that 2017 point and confidence intervals not shown.")
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r household_measures_9010_s}
+plot_measure_smoothed(data = household_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title = "90/10 ratio",
+                      y_lims = NULL,
+                      y_seqs = waiver())
+
+```
+
+##### With Errors
+``` {r household_measures_9010_e}
+plot_measure_errors(data = household_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio by household type",
+                      y_lims = NULL,
+                      y_seqs = waiver())
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r household_measures_mean_s}
+plot_measure_smoothed(data = household_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI",
+                      y_lims = c(15000, 66000),
+                      y_seqs = seq(15000, 66000, 3000))
+
+```
+
+##### With Errors
+``` {r household_measures_mean_e}
+plot_measure_errors(data = household_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI",
+                      y_lims = c(5000, 70000),
+                      y_seqs = seq(5000, 70000, 5000))
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r household_measures_median_s}
+plot_measure_smoothed(data = household_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI",
+                      y_lims = c(11000, 62000),
+                      y_seqs = seq(11000, 62000, 3000))
+
+```
+
+##### With Errors
+``` {r household_measures_median_e}
+plot_measure_errors(data = household_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median income by household type",
+                      y_lims = c(10000, 66000),
+                      y_seqs = seq(10000, 66000, 4000))
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r household_measures_total_s}
+plot_measure_smoothed(data = household_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI over individuals",
+                      y_lims = c(0, 1.2*10**11),
+                      y_seqs = seq(0, 1.2*10**11, 1*10**10))
+
+```
+
+##### With Errors
+``` {r household_measures_total_e}
+plot_measure_errors(data = household_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI over individuals",
+                      y_lims = c(0, 1.3*10**11),
+                      y_seqs = seq(0, 1.3*10**11, 1*10**10))
+```
+
+### Income and Population Shares {.tabset}
+
+#### BHC
+``` {r incpop_hh_bhc}
+plot_shares(income_type = "BHC", data = household_table, 
+                ylim_max = 0.5)
+```
+
+#### AHC
+``` {r incpop_hh_ahc}
+plot_shares(income_type = "AHC", data = household_table, ylim_max = 0.5)
+```
+
+#### Both
+```{r inc_pop_both_hh}
+plot_both_shares(data = household_table, ylim_max = .5)
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_hh}
+plot_area_stacked(data = household_table, subgroup_type = "all households", between_name = "Between household types", ylim_max = 0.35, change_max = 0.02)
+
+data_bhc <- get_theil_between(household_table, "BHC", "Between household types")
+data_ahc <- get_theil_between(household_table, "AHC", "Between household types")
+
+print("BHC Linear Regression, Between household types")
+regression_data <- data_bhc[Group == "Between household types" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data)))
+
+print("AHC Linear Regression, Between household types")
+regression_data <- data_ahc[Group == "Between household types" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data)))
+
+print("BHC Quadratic Regression, multi-adult")
+regression_data <- data_bhc[Group == "Multi-adult" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("AHC Quadratic Regression, multi-adult")
+regression_data <- data_ahc[Group == "Multi-adult" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("BHC Quadratic Regression, multi-adult with children")
+regression_data <- data_bhc[Group == "Multi-adult with children" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("AHC Quadratic Regression, multi-adult with children")
+regression_data <- data_ahc[Group == "Multi-adult" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2))
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("BHC Linear Regression, multi-adult 65+")
+regression_data <- data_bhc[Group == "Multi-adult, 65+" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+reg <- lm(Value ~ Year, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+
+print("AHC Quadratic Regression, multi-adult 65+")
+regression_data <- data_ahc[Group == "Multi-adult, 65+" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+
+
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_hh}
+theil_breakdown(data = household_table, group_type = "household type", ylim = 0.12)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_hh}
+theil_breakdown_errors(data = household_table, group_type = "household type", ylim = 0.16)
+```
+
+## Senior and Non-Senior Households
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r sns_measures_gini_s}
+plot_measure_smoothed(data = all_senior_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient", 
+                      
+                      y_lims = c(.3, .42),
+                      y_seqs = seq(.3, .42, .01))
+
+```
+
+##### With Errors
+``` {r sns_measures_gini_e}
+plot_measure_errors(data = all_senior_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient", 
+                    
+                      y_lims = c(.26, .46),
+                      y_seqs = seq(.26, .46, .02))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r sns_measures_theil_s}
+plot_measure_smoothed(data = all_senior_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index", 
+                      
+                      y_lims = c(.16, .34),
+                      y_seqs = seq(.16, .34, .02))
+
+print("Senior BHC Quadratic WLS")
+reg <- quad_WLS(data=all_senior_table, reg_group="Senior", reg_variable="Theil", reg_income = "BHC", excluded_years = c(2022, 2023), middle_year = 2014)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2014
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2014)+reg$coefficients[["Year_sq"]]*((2007-2014)**2)))
+print(paste0("2021: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2021-2014)+reg$coefficients[["Year_sq"]]*((2021-2014)**2)))
+
+print("Senior AHC Quadratic WLS")
+reg <- quad_WLS(data=all_senior_table, reg_group="Senior", reg_variable="Theil", reg_income = "AHC", excluded_years = c(2022, 2023), middle_year = 2014)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2014
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2014)+reg$coefficients[["Year_sq"]]*((2007-2014)**2)))
+print(paste0("2021: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2021-2014)+reg$coefficients[["Year_sq"]]*((2021-2014)**2)))
+
+print("Non-senior BHC Quadratic WLS")
+reg <- quad_WLS(data=all_senior_table, reg_group="Non-senior", reg_variable="Theil", reg_income = "BHC", excluded_years = c(2022, 2023), middle_year = 2014)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2014)+reg$coefficients[["Year_sq"]]*((2007-2014)**2)))
+print(paste0("2021: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2021-2014)+reg$coefficients[["Year_sq"]]*((2021-2014)**2)))
+
+print("Non-senior AHC Quadratic WLS")
+reg <- quad_WLS(data=all_senior_table, reg_group="Non-senior", reg_variable="Theil", reg_income = "AHC", excluded_years = c(2022, 2023), middle_year = 2014)
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2014
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2014)+reg$coefficients[["Year_sq"]]*((2007-2014)**2)))
+print(paste0("2021: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2021-2014)+reg$coefficients[["Year_sq"]]*((2021-2014)**2)))
+
+
+```
+
+##### With Errors
+``` {r sns_measures_theil_e}
+plot_measure_errors(data = all_senior_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index", 
+                    
+                      y_lims = c(.1, .46),
+                      y_seqs = seq(.1, .46, .03))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r sns_measures_8020_s}
+plot_measure_smoothed(data = all_senior_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio", 
+                      
+                      y_lims = c(2.2, 3.6),
+                      y_seqs = seq(2.2, 3.6, .2))
+
+```
+
+##### With Errors
+``` {r sns_measures_8020_e}
+plot_measure_errors(data = all_senior_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio", 
+                    
+                      y_lims = c(1.8, 3.8),
+                      y_seqs = seq(1.8, 3.8, .2))
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r sns_measures_9010_s}
+plot_measure_smoothed(data = all_senior_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio", 
+                      
+                      y_lims = c(3.2, 7.6),
+                      y_seqs = seq(3.2, 7.6, .4))
+
+```
+
+##### With Errors
+``` {r sns_measures_9010_e}
+plot_measure_errors(data = all_senior_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio", 
+                    
+                      y_lims = c(2, 9.5),
+                      y_seqs = seq(2, 9.5, .5))
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r sns_measures_mean_s}
+plot_measure_smoothed(data = all_senior_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI", 
+                      
+                      y_lims = c(28000, 58000),
+                      y_seqs = seq(28000, 58000, 5000))
+
+```
+
+##### With Errors
+``` {r sns_measures_mean_e}
+plot_measure_errors(data = all_senior_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI", 
+                    
+                      y_lims = c(24000, 59000),
+                      y_seqs = seq(24000, 59000, 5000))
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r sns_measures_median_s}
+plot_measure_smoothed(data = all_senior_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI", 
+                      
+                      y_lims = c(20000, 50000),
+                      y_seqs = seq(20000, 50000, 5000))
+
+```
+
+##### With Errors
+``` {r sns_measures_median_e}
+plot_measure_errors(data = all_senior_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI", 
+                    
+                      y_lims = c(18000, 53000),
+                      y_seqs = seq(18000, 53000, 5000))
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r sns_measures_total_s}
+plot_measure_smoothed(data = all_senior_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI over individuals", 
+                      
+                      y_lims = c(0, 2.5*10**11),
+                      y_seqs = seq(0, 2.5*10**11, .5*10**11))
+
+```
+
+##### With Errors
+``` {r sns_measures_total_e}
+plot_measure_errors(data = all_senior_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total income by household type", 
+                    
+                      y_lims = c(0, 2.5*10**11),
+                      y_seqs = seq(0, 2.5*10**11, .5*10**11))
+```
+
+### Income and Population Shares {.tabset}
+
+#### Standard
+``` {r incpop_sns_bhc}
+proportion_plots_s(data = all_senior_table, 
+                   ylim_max = 0.9, 
+                   group_type = "household type" 
+                   )
+```
+
+#### With Errors
+``` {r incpop_sns_ahc}
+proportion_plots_s_errors(data = all_senior_table, ylim_max = 0.9, group_type = "household type")
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_sns}
+plot_area_stacked(data = all_senior_table, 
+                  subgroup_type = "all households", 
+                  between_name = "Between household types",
+                  ylim_max = 0.35,
+                  change_max = .06,
+                  change_gap = 0.02)
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_sns}
+theil_breakdown(data = all_senior_table,
+                group_type = "household type", 
+                
+                ylim = .14)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_sns}
+theil_breakdown_errors(data = all_senior_table, 
+                       group_type = "household type", 
+                       
+                       ylim = .16)
+```
+
+## Seniors by Work and Living Arrangements
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r swla_measures_gini_s}
+plot_measure_smoothed(data = senior_complete_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient",
+                                            y_lims = c(.16, .49),
+                      y_seqs = seq(.16, .49, .03)
+                      )
+
+```
+
+##### With Errors
+``` {r swla_measures_gini_e}
+plot_measure_errors(data = senior_complete_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient",
+                    y_lims = c(0.05, .85),
+                      y_seqs = seq(0.05, .85, .05)
+                    )
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r swla_measures_theil_s}
+plot_measure_smoothed(data = senior_complete_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index",
+                      y_lims = c(.05, .55),
+                      y_seqs = seq(.05, .55, .05)
+                      )
+
+```
+
+##### With Errors
+``` {r swla_measures_theil_e}
+plot_measure_errors(data = senior_complete_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index",
+                    y_lims = c(-.2, 1.8),
+                      y_seqs = seq(-.2, 1.8, .2)
+                    )
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r swla_measures_8020_s}
+plot_measure_smoothed(data = senior_complete_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio",
+                      y_lims = c(1.2, 3.8),
+                      y_seqs = seq(1.2, 3.8, .2) 
+                      )
+
+```
+
+##### With Errors
+``` {r swla_measures_8020_e}
+plot_measure_errors(data = senior_complete_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio",                      
+                    y_lims = NULL,
+                      y_seqs = waiver() 
+                    )
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r swla_measures_9010_s}
+plot_measure_smoothed(data = senior_complete_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio",
+                      y_lims = NULL,
+                      y_seqs = waiver() 
+                      )
+
+```
+
+##### With Errors
+``` {r swla_measures_9010_e}
+plot_measure_errors(data = senior_complete_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio",                      
+                    y_lims = NULL,
+                      y_seqs = waiver()
+                    )
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r swla_measures_mean_s}
+plot_measure_smoothed(data = senior_complete_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI",                      
+                      y_lims = c(19000, 69000),
+                      y_seqs = seq(19000, 69000, 5000) 
+                      )
+
+```
+
+##### With Errors
+``` {r swla_measures_mean_e}
+plot_measure_errors(data = senior_complete_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI",                      
+                    y_lims = c(14000, 84000),
+                      y_seqs = seq(14000, 84000, 5000) 
+                    )
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r swla_measures_median_s}
+plot_measure_smoothed(data = senior_complete_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI",                      
+                      y_lims = c(15000, 60000),
+                      y_seqs = seq(15000, 60000, 5000)
+                      )
+
+```
+
+##### With Errors
+``` {r swla_measures_median_e}
+plot_measure_errors(data = senior_complete_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI",
+                    y_lims = c(0, 70000),
+                      y_seqs = seq(0, 70000, 5000)
+                    )
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r swla_measures_total_s}
+plot_measure_smoothed(data = senior_complete_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI",
+                      y_lims = c(0, 1.6*10**10),
+                      y_seqs = seq(0, 1.6*10**10, .2*10**10)
+                      )
+
+```
+
+##### With Errors
+``` {r swla_measures_total_e}
+plot_measure_errors(data = senior_complete_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI",
+                    y_lims = c(-.2*10**10, 2.0*10**10),
+                      y_seqs = seq(-.2*10**10, 2.0*10**10, .2*10**10) 
+                    )
+```
+
+### Income and Population Shares {.tabset}
+
+#### Standard
+``` {r incpop_swla_bhc}
+proportion_plots_s(data = senior_complete_table, ylim_max = 0.35, group_type = "65+ household type")
+```
+
+#### With Errors
+``` {r incpop_swla_ahc}
+proportion_plots_s_errors(data = senior_complete_table, ylim_max = 0.5, group_type = "65+ household type")
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_swla}
+plot_area_stacked(data = senior_complete_table, subgroup_type = "65+ households", between_name = "Between household types", factor_list = c(sca_factors, "Between household types"), ylim_max = 0.3, change_max = 0.04,
+                  total_theil_type = "senior households")
+
+data_bhc <- get_theil_between(senior_complete_table, "BHC", "Between household types")
+data_ahc <- get_theil_between(senior_complete_table, "AHC", "Between household types")
+
+print("BHC Linear Regression, Between household types")
+regression_data <- data_bhc[Group == "Between household types" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data)))
+
+print("AHC Linear Regression, Between household types")
+regression_data <- data_ahc[Group == "Between household types" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data)))
+
+print("BHC Linear Regression, senior single only, senior not working")
+regression_data <- data_bhc[Group == "Senior single only,\nsenior not working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data, , weights = 1 / (Margin_Of_Error**2))))
+
+print("AHC Linear Regression, senior single only, senior not working")
+regression_data <- data_ahc[Group == "Senior single only,\nsenior not working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data, , weights = 1 / (Margin_Of_Error**2))))
+
+print("BHC Quadratic Regression, senior couple only, senior not working")
+regression_data <- data_bhc[Group == "Senior couple only,\nsenior not working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("AHC Quadratic Regression, senior couple only, senior not working")
+regression_data <- data_ahc[Group == "Senior couple only,\nsenior not working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("BHC Quadratic Regression, senior single or couple with other adults, senior not working")
+regression_data <- data_bhc[Group == "Senior single or couple\nwith other adults,\nsenior not working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("AHC Quadratic Regression, senior single or couple with other adults, senior not working")
+regression_data <- data_ahc[Group == "Senior single or couple\nwith other adults,\nsenior not working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("BHC Linear Regression, senior single or couple with other adults, senior working")
+regression_data <- data_bhc[Group == "Senior single or couple\nwith other adults,\nsenior working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data, , weights = 1 / (Margin_Of_Error**2))))
+
+print("AHC Linear Regression, senior single or couple with other adults, senior working")
+regression_data <- data_ahc[Group == "Senior single or couple\nwith other adults,\nsenior working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data, , weights = 1 / (Margin_Of_Error**2))))
+
+print("BHC Quadratic Regression, senior couple only, senior working")
+regression_data <- data_bhc[Group == "Senior couple only,\nsenior working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("AHC Quadratic Regression, senior couple only, senior working")
+regression_data <- data_ahc[Group == "Senior couple only,\nsenior working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+regression_data[, Year_sq := Year**2]
+reg <- lm(Value ~ Year + Year_sq, regression_data, weights = 1 / (Margin_Of_Error**2) )
+print(summary(reg))
+print(paste0("Peak year: ", 
+             (-reg$coefficients[["Year"]])/(2*reg$coefficients[["Year_sq"]]) + 2015
+                                          ))
+
+print(paste0("2007: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2007-2015)+reg$coefficients[["Year_sq"]]*((2007-2015)**2)))
+print(paste0("2023: ", reg$coefficients[["(Intercept)"]] + reg$coefficients[["Year"]]*(2023-2015)+reg$coefficients[["Year_sq"]]*((2023-2015)**2)))
+
+print("BHC Quadratic Regression, senior single only, senior working")
+regression_data <- data_bhc[Group == "Senior single only,\nsenior working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data, , weights = 1 / (Margin_Of_Error**2))))
+
+print("AHC Quadratic Regression, senior single only, senior working")
+regression_data <- data_ahc[Group == "Senior single only,\nsenior working" & !(Year %in% 2022)]
+regression_data[, Year := Year - 2015]
+print(summary(lm(Value ~ Year, regression_data, , weights = 1 / (Margin_Of_Error**2))))
+
+```
+
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_swla}
+theil_breakdown(data = senior_complete_table, group_type = "65+ household type", ylim = .12)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_swla}
+theil_breakdown_errors(data = senior_complete_table, group_type = "65+ household type", ylim = .18)
+```
+
+## Additional Results
+
+The following results are not included in the Analytical Note. Please contact the authors for more information.
+
+## Seniors by Working Arrangements
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r swa_measures_gini_s}
+plot_measure_smoothed(data = senior_work_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient",
+                      y_lims = c(.26, .40),
+                      y_seqs = seq(.26, .40, .02))
+
+```
+
+##### With Errors
+``` {r swa_measures_gini_e}
+plot_measure_errors(data = senior_work_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient",
+                      y_lims = c(.23, 0.51),
+                      y_seqs = seq(.23, 0.51, 0.02))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r swa_measures_theil_s}
+plot_measure_smoothed(data = senior_work_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index",
+                      y_lims = c(.12, .3),
+                      y_seqs = seq(.12, .3, 0.02))
+
+```
+
+##### With Errors
+``` {r swa_measures_theil_e}
+plot_measure_errors(data = senior_work_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index",
+                      y_lims = c(.05, .6),
+                      y_seqs = seq(.05, .6, .05))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r swa_measures_8020_s}
+plot_measure_smoothed(data = senior_work_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio",
+                      y_lims = c(2, 3.4),
+                      y_seqs = seq(2, 3.4, 0.2))
+
+```
+
+##### With Errors
+``` {r swa_measures_8020_e}
+plot_measure_errors(data = senior_work_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio",
+                      y_lims = c(.8, 5.6),
+                      y_seqs = seq(.8, 5.6, .4))
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r swa_measures_9010_s}
+plot_measure_smoothed(data = senior_work_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio",
+                      y_lims = c(2.5, 7.5),
+                      y_seqs = seq(2.5, 7.5, .5))
+
+```
+
+##### With Errors
+``` {r swa_measures_9010_e}
+plot_measure_errors(data = senior_work_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio",
+                      y_lims = NULL,
+                      y_seqs = waiver())
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r swa_measures_mean_s}
+plot_measure_smoothed(data = senior_work_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI",
+                      y_lims = c(25000, 70000),
+                      y_seqs = seq(25000, 70000, 5000))
+
+```
+
+##### With Errors
+``` {r swa_measures_mean_e}
+plot_measure_errors(data = senior_work_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI",
+                      y_lims = c(20000, 75000),
+                      y_seqs = seq(20000, 75000, 5000))
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r swa_measures_median_s}
+plot_measure_smoothed(data = senior_work_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI",
+                      y_lims = c(20000, 60000),
+                      y_seqs = seq(20000, 60000, 5000))
+
+```
+
+##### With Errors
+``` {r swa_measures_median_e}
+plot_measure_errors(data = senior_work_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI",
+                      y_lims = c(15000, 65000),
+                      y_seqs = seq(15000, 65000, 5000))
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r swa_measures_total_s}
+plot_measure_smoothed(data = senior_work_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI",
+                      y_lims = c(0, 3.5 *10**10),
+                      y_seqs = seq(0, 3.5*10**10, .5*10**10))
+
+```
+
+##### With Errors
+``` {r swa_measures_total_e}
+plot_measure_errors(data = senior_work_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI",
+                      y_lims = c(0, 3.5*10**10),
+                      y_seqs = seq(0, 3.5*10**10, 0.5*10**10))
+```
+
+### Income and Population Shares {.tabset}
+
+#### Standard
+``` {r incpop_swa_bhc}
+proportion_plots_s(data = senior_work_table, ylim_max = 0.85, group_type = "65+ household type")
+```
+
+#### With Errors
+``` {r incpop_swa_ahc}
+proportion_plots_s_errors(data = senior_work_table, ylim_max = 0.9, group_type = "65+ household type")
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_swa}
+plot_area_stacked(data = senior_work_table, 
+                  subgroup_type = "65+ households", 
+                  between_name = "Between household types",
+                  ylim_max = 0.3, 
+                  change_max = 0.09, 
+                  change_gap = 0.03,
+                  total_theil_type = "senior households")
+
+
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_swa}
+theil_breakdown(data = senior_work_table, group_type = "65+ household type",  ylim = 0.16)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_swa}
+theil_breakdown_errors(data = senior_work_table, group_type = "65+ household type", ylim = 0.22)
+```
+
+
+
+## Seniors by Living Arrangements
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r sla_measures_gini_s}
+plot_measure_smoothed(data = senior_relationship_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient",
+                      y_lims = c(0.18, .44),
+                      y_seqs = seq(0.18, .44, .02))
+
+```
+
+##### With Errors
+``` {r sla_measures_gini_e}
+plot_measure_errors(data = senior_relationship_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient",
+                      y_lims = c(.08, .59),
+                      y_seqs = seq(.08, .59, .03))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r sla_measures_theil_s}
+plot_measure_smoothed(data = senior_relationship_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index",
+                      y_lims = c(.06, .38),
+                      y_seqs = seq(.06, .38, .02))
+
+```
+
+##### With Errors
+``` {r sla_measures_theil_e}
+plot_measure_errors(data = senior_relationship_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index",
+                      y_lims = c(-.04, .84),
+                      y_seqs = seq(-.04, .84, .04))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r sla_measures_8020_s}
+plot_measure_smoothed(data = senior_relationship_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio",
+                      y_lims = c(1.4, 3.5),
+                      y_seqs = seq(1.4, 3.5, .3))
+
+```
+
+##### With Errors
+``` {r sla_measures_8020_e}
+plot_measure_errors(data = senior_relationship_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio",
+                      y_lims = NULL,
+                      y_seqs = waiver())
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r sla_measures_9010_s}
+plot_measure_smoothed(data = senior_relationship_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio",
+                      y_lims = c(2, 10),
+                      y_seqs = seq(2, 10, .8))
+
+```
+
+##### With Errors
+``` {r sla_measures_9010_e}
+plot_measure_errors(data = senior_relationship_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio",
+                      y_lims = NULL,
+                      y_seqs = waiver())
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r sla_measures_mean_s}
+plot_measure_smoothed(data = senior_relationship_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI",
+                      y_lims = c(21000, 51000),
+                      y_seqs = seq(21000, 51000, 5000))
+
+```
+
+##### With Errors
+``` {r sla_measures_mean_e}
+plot_measure_errors(data = senior_relationship_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI",
+                      y_lims = c(16000, 66000),
+                      y_seqs = seq(16000, 66000, 5000))
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r sla_measures_median_s}
+plot_measure_smoothed(data = senior_relationship_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI",
+                      y_lims = c(17000, 47000),
+                      y_seqs = seq(17000, 47000, 5000))
+
+```
+
+##### With Errors
+``` {r sla_measures_median_e}
+plot_measure_errors(data = senior_relationship_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI",
+                      y_lims = c(14000, 59000),
+                      y_seqs = seq(14000, 59000, 5000))
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r sla_measures_total_s}
+plot_measure_smoothed(data = senior_relationship_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI",
+                      y_lims = c(0, 2.5*10**10),
+                      y_seqs = seq(0, 2.5*10**10, 0.5*10**10))
+
+```
+
+##### With Errors
+``` {r sla_measures_total_e}
+plot_measure_errors(data = senior_relationship_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI",
+                      y_lims = c(0, 3*10**10),
+                      y_seqs = seq(0, 3*10**10, 0.5*10**10))
+```
+
+### Income and Population Shares {.tabset}
+
+#### Standard
+``` {r incpop_sla_bhc}
+proportion_plots_s(data = senior_relationship_table, ylim_max = 0.55, group_type = "65+ household type")
+```
+
+#### With Errors
+``` {r incpop_sla_ahc}
+proportion_plots_s_errors(data = senior_relationship_table, ylim_max = 0.7, group_type = "65+ household type")
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_sla}
+plot_area_stacked(data = senior_relationship_table, subgroup_type = "65+ households", between_name = "Between household types", factor_list = c(srt_factors, "Between household types"), ylim_max = 0.3, change_max = 0.06, change_gap = 0.02,
+                  total_theil_type = "senior households")
+
+
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_sla}
+theil_breakdown(data = senior_relationship_table, 
+                group_type = "65+ household type",
+                ylim = 0.1)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_sla}
+theil_breakdown_errors(data = senior_relationship_table, group_type = "65+ household type", ylim = .18)
+```
+
+
+
+## Multi-adult Households with Children (by Age of Youngest Child)
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r macy_measures_gini_s}
+plot_measure_smoothed(data = multiadult_children_youngest_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient", 
+                      factor_list = c("<5", "5-11", "12+"),
+                      y_lims = c(0.26, 0.40),
+                      y_seqs = seq(0.26, 0.40, 0.02))
+
+```
+
+##### With Errors
+``` {r macy_measures_gini_e}
+plot_measure_errors(data = multiadult_children_youngest_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient", 
+                    factor_list = c("<5", "5-11", "12+"),
+                    y_lims = c(0.22, 0.46),
+                    y_seqs = seq(0.22, 0.46, 0.02))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r macy_measures_theil_s}
+plot_measure_smoothed(data = multiadult_children_youngest_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index", 
+                      factor_list = c("<5", "5-11", "12+"),
+                      y_lims = c(0.12, 0.32),
+                    y_seqs = seq(0.12, 0.32, 0.02))
+
+```
+
+##### With Errors
+``` {r macy_measures_theil_e}
+plot_measure_errors(data = multiadult_children_youngest_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index", 
+                    factor_list = c("<5", "5-11", "12+"),
+                    y_lims = c(0.08, 0.52),
+                    y_seqs = seq(0.08, 0.52, 0.02))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r macy_measures_8020_s}
+plot_measure_smoothed(data = multiadult_children_youngest_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio", 
+                      factor_list = c("<5", "5-11", "12+"),
+                      y_lims = c(2, 2.9),
+                    y_seqs = seq(2, 2.9, 0.1))
+
+```
+
+##### With Errors
+``` {r macy_measures_8020_e}
+plot_measure_errors(data = multiadult_children_youngest_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio", 
+                    factor_list = c("<5", "5-11", "12+"),
+                                          y_lims = c(1.9, 4),
+                    y_seqs = seq(1.9, 4, 0.1))
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r macy_measures_9010_s}
+plot_measure_smoothed(data = multiadult_children_youngest_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio", 
+                      factor_list = c("<5", "5-11", "12+"),
+                      y_lims = c(3, 7),
+                    y_seqs = seq(3, 7, .5))
+
+```
+
+##### With Errors
+``` {r macy_measures_9010_e}
+plot_measure_errors(data = multiadult_children_youngest_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio by multi-adult with children household type", 
+                    factor_list = c("<5", "5-11", "12+"),
+                    y_lims = NULL,
+                    y_seqs = waiver())
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r macy_measures_mean_s}
+plot_measure_smoothed(data = multiadult_children_youngest_table, 
+                      selected_variable = "Mean", plot_title ="Mean HEDI", 
+                      factor_list = c("<5", "5-11", "12+"),
+                    y_lims = c(25000, 57000),
+                    y_seqs = seq(25000, 57000, 2000))
+
+```
+
+##### With Errors
+``` {r macy_measures_mean_e}
+plot_measure_errors(data = multiadult_children_youngest_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI", 
+                    factor_list = c("<5", "5-11", "12+"),
+                    y_lims = c(20000, 62000),
+                    y_seqs = seq(20000, 62000, 2000))
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r macy_measures_median_s}
+plot_measure_smoothed(data = multiadult_children_youngest_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI", 
+                      factor_list = c("<5", "5-11", "12+"),
+                                            y_lims = c(22000, 50000),
+                    y_seqs = seq(22000, 50000, 2000))
+
+```
+
+##### With Errors
+``` {r macy_measures_median_e}
+plot_measure_errors(data = multiadult_children_youngest_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI", 
+                    factor_list = c("<5", "5-11", "12+"),
+                    y_lims = c(17000, 56000),
+                    y_seqs = seq(17000, 56000, 3000))
+```
+
+#### Total income {.tabset}
+
+##### Standard
+``` {r macy_measures_total_s}
+plot_measure_smoothed(data = multiadult_children_youngest_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI over individuals", 
+                      factor_list = c("<5", "5-11", "12+"),
+                                            y_lims = c(1.5*10**10, 4.5*10**10),
+                    y_seqs = seq(1.5*10**10, 4.5*10**10, .5*10**10))
+
+```
+
+##### With Errors
+``` {r macy_measures_total_e}
+plot_measure_errors(data = multiadult_children_youngest_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI over idividuals", 
+                    factor_list = c("<5", "5-11", "12+"),
+                    y_lims = c(1*10**10, 5*10**10),
+                    y_seqs = seq(1*10**10, 5*10**10, .5*10**10))
+```
+
+### Income and Population Shares {.tabset}
+
+#### BHC
+``` {r incpop_macy_bhc}
+plot_shares(income_type = "BHC", 
+            data = multiadult_children_youngest_table, 
+            ylim_max = 0.5,
+            factor_list = c("<5", "5-11", "12+"))
+```
+
+#### AHC
+``` {r incpop_macy_ahc}
+plot_shares(income_type = "AHC", 
+            data = multiadult_children_youngest_table, 
+            ylim_max = 0.5,
+            factor_list = c("<5", "5-11", "12+"))
+```
+
+#### Both
+```{r inc_pop_both_macy}
+plot_both_shares(data = multiadult_children_youngest_table, ylim_max = .5, factor_list = c("<5", "5-11", "12+"))
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_macy}
+plot_area_stacked(data = multiadult_children_youngest_table, subgroup_type = "multi-adult with children households", between_name = "Between household types", factor_list = c("<5", "5-11", "12+", "Between household types"), ylim_max = 0.3, change_max = 0.03,
+                  total_theil_type = "multi-adult with\nchildren households")
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_macy}
+theil_breakdown(data = multiadult_children_youngest_table, group_type = "multi-adult with children household type", factor_list = c("<5", "5-11", "12+"), ylim = .08)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_macy}
+theil_breakdown_errors(data = multiadult_children_youngest_table, group_type = "multi-adult with children household type", factor_list = c("<5", "5-11", "12+"), ylim = 0.12)
+```
+
+
+## Multi-adult Households with Children (by Age of Oldest Adult)
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r maco_measures_gini_s}
+plot_measure_smoothed(data = multiadult_children_oldest_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient",
+                      y_lims = c(0.22, .42),
+                    y_seqs = seq(.22, .42, 0.02))
+
+```
+
+##### With Errors
+``` {r maco_measures_gini_e}
+plot_measure_errors(data = multiadult_children_oldest_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient",
+                    y_lims = c(.13, .57),
+                    y_seqs = seq(.13, .57, 0.02))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r maco_measures_theil_s}
+plot_measure_smoothed(data = multiadult_children_oldest_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index",
+                    y_lims = c(0.08, .38),
+                    y_seqs = seq(0.08, .38, 0.02))
+
+```
+
+##### With Errors
+``` {r maco_measures_theil_e}
+plot_measure_errors(data = multiadult_children_oldest_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index",
+                    y_lims = c(.04, .64),
+                    y_seqs = seq(.04, .64, 0.03))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r maco_measures_8020_s}
+plot_measure_smoothed(data = multiadult_children_oldest_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio",
+                    y_lims = c(1.8, 4.2),
+                    y_seqs = seq(1.8, 4.2, 0.2))
+
+```
+
+##### With Errors
+``` {r maco_measures_8020_e}
+plot_measure_errors(data = multiadult_children_oldest_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio",
+                    y_lims = NULL,
+                    y_seqs = waiver())
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r maco_measures_9010_s}
+plot_measure_smoothed(data = multiadult_children_oldest_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio",
+                    y_lims = c(2.6, 8),
+                    y_seqs = seq(2.6, 8, 0.5))
+
+print("Note that 65+ falls outside the y-axis range of the AHC 90/10 Ratio plot")
+
+```
+
+##### With Errors
+``` {r maco_measures_9010_e}
+plot_measure_errors(data = multiadult_children_oldest_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio",
+                    y_lims = NULL,
+                    y_seqs = waiver())
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r maco_measures_mean_s}
+plot_measure_smoothed(data = multiadult_children_oldest_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI",
+                    y_lims = c(22000, 57000),
+                    y_seqs = seq(22000, 57000, 5000))
+
+```
+
+##### With Errors
+``` {r maco_measures_mean_e}
+plot_measure_errors(data = multiadult_children_oldest_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI",
+                    y_lims = c(14000, 64000),
+                    y_seqs = seq(14000, 64000, 5000))
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r maco_measures_median_s}
+plot_measure_smoothed(data = multiadult_children_oldest_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI",
+                    y_lims = c(20000, 50000),
+                    y_seqs = seq(20000, 50000, 5000))
+
+```
+
+##### With Errors
+``` {r maco_measures_median_e}
+plot_measure_errors(data = multiadult_children_oldest_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI",
+                    y_lims = c(5000, 55000),
+                    y_seqs = seq(5000, 55000, 5000))
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r maco_measures_total_s}
+plot_measure_smoothed(data = multiadult_children_oldest_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI across individuals",
+                    y_lims = c(0, 7*10**10),
+                    y_seqs = seq(0, 7*10**10, 1*10**10))
+
+```
+
+##### With Errors
+``` {r maco_measures_total_e}
+plot_measure_errors(data = multiadult_children_oldest_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI",
+                    y_lims = c(0, 7*10**10),
+                    y_seqs = seq(0, 7*10**10, 1*10**10))
+```
+
+### Income and Population Shares {.tabset}
+
+#### BHC
+``` {r incpop_maco_bhc}
+plot_shares(income_type = "BHC", data = multiadult_children_oldest_table, ylim_max = 0.65)
+```
+
+#### AHC
+``` {r incpop_maco_ahc}
+plot_shares(income_type = "AHC", data = multiadult_children_oldest_table, ylim_max = 0.65)
+```
+
+#### Both
+```{r inc_pop_both_maco}
+plot_both_shares(data = multiadult_children_oldest_table, ylim_max = .65)
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_maco}
+plot_area_stacked(data = multiadult_children_oldest_table, subgroup_type = "multi-adult with children households", between_name = "Between household types", ylim_max = 0.3, change_max = .04, total_theil_type = "multi-adult with\nchildren households")
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_maco}
+theil_breakdown(data = multiadult_children_oldest_table, group_type = "multi-adult with children household type", ylim = .1)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_maco}
+theil_breakdown_errors(data = multiadult_children_oldest_table, group_type = "multi-adult with children household type", ylim = 0.14)
+```
+
+
+## Multi-adult Households without Children
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r ma_measures_gini_s}
+plot_measure_smoothed(data = multiadult_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient",
+                    y_lims = c(.24, .42),
+                    y_seqs = seq(0.24, 0.42, .02))
+
+```
+
+##### With Errors
+``` {r ma_measures_gini_e}
+plot_measure_errors(data = multiadult_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient",
+                    y_lims = c(.21, .47),
+                    y_seqs = seq(.21, .47, .02))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r ma_measures_theil_s}
+plot_measure_smoothed(data = multiadult_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index",
+                      y_lims = c(0.1, 0.34),
+                      y_seqs = seq(0.1, 0.34, .02))
+
+```
+
+##### With Errors
+``` {r ma_measures_theil_e}
+plot_measure_errors(data = multiadult_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index",
+                    y_lims = c(0.05, 0.5),
+                    y_seqs = seq(0.05, 0.5, .05))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r ma_measures_8020_s}
+plot_measure_smoothed(data = multiadult_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio",
+                                          y_lims = c(2.0, 3.8),
+                    y_seqs = seq(2.0, 3.8, .2))
+
+```
+
+##### With Errors
+``` {r ma_measures_8020_e}
+plot_measure_errors(data = multiadult_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio",
+                    y_lims = c(1, 6),
+                    y_seqs = seq(1, 6, .5))
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r ma_measures_9010_s}
+plot_measure_smoothed(data = multiadult_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio",
+                      y_lims = c(3, 16),
+                    y_seqs = seq(3, 16, 1))
+
+```
+
+##### With Errors
+``` {r ma_measures_9010_e}
+plot_measure_errors(data = multiadult_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio",
+                                        y_lims = NULL,
+                    y_seqs = waiver())
+```
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r ma_measures_mean_s}
+plot_measure_smoothed(data = multiadult_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI",
+                                          y_lims = c(35000, 70000),
+                    y_seqs = seq(35000, 70000, 5000))
+
+```
+
+##### With Errors
+``` {r ma_measures_mean_e}
+plot_measure_errors(data = multiadult_table,
+                    selected_variable = "Mean", 
+                    plot_title ="Mean income by multi-adult household type",
+                                        y_lims = c(27000, 77000),
+                    y_seqs = seq(27000, 77000, 5000))
+```
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r ma_measures_median_s}
+plot_measure_smoothed(data = multiadult_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI",
+                                          y_lims = c(34000, 64000),
+                    y_seqs = seq(34000, 64000, 5000))
+
+```
+
+##### With Errors
+``` {r ma_measures_median_e}
+plot_measure_errors(data = multiadult_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median income by multi-adult household type",
+                                        y_lims = c(24000, 69000),
+                    y_seqs = seq(24000, 69000, 5000))
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r ma_measures_total_s}
+plot_measure_smoothed(data = multiadult_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI",
+                      y_lims = c(0, 5*10**10),
+                      y_seqs = seq(0, 5*10**10, .5*10**10))
+
+```
+
+##### With Errors
+``` {r ma_measures_total_e}
+plot_measure_errors(data = multiadult_table, 
+                    selected_variable = "Total", 
+                                          plot_title ="Total HEDI",
+                      y_lims = c(0.5*10**10, 5.5*10**10),
+                      y_seqs = seq(0.5*10**10, 5.5*10**10, .5*10**10))
+```
+
+### Income and Population Shares {.tabset}
+
+#### BHC
+``` {r incpop_ma_bhc}
+plot_shares(income_type = "BHC", data = multiadult_table, ylim_max = 0.6)
+```
+
+#### AHC
+``` {r incpop_ma_ahc}
+plot_shares(income_type = "AHC", data = multiadult_table, ylim_max = 0.65)
+```
+
+#### Both
+```{r inc_pop_both_ma}
+plot_both_shares(data = multiadult_table, ylim_max = .65)
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_ma}
+plot_area_stacked(data = multiadult_table, subgroup_type = "multi-adult households", between_name = "Between household types", ylim_max = 0.35, change_max = 0.06, change_gap = 0.02, total_theil_type = "multi-adult without\nchildren households")
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_ma}
+theil_breakdown(data = multiadult_table, group_type = "multi-adult household type", ylim = 0.1)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_ma}
+theil_breakdown_errors(data = multiadult_table, group_type = "multi-adult household type", ylim = 0.16)
+```
+
+
+## CPI Regions
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r cpir_measures_gini_s}
+plot_measure_smoothed(data = cpi_region_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient", 
+                      factor_list = cpi_region_list,
+                                            y_lims = c(.28, .44),
+                      y_seqs = seq(.28, .44, .02))
+
+```
+
+##### With Errors
+``` {r cpir_measures_gini_e}
+plot_measure_errors(data = cpi_region_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient", 
+                    factor_list = cpi_region_list,
+                                            y_lims = c(0.25, 0.51),
+                      y_seqs = seq(.25, .51, .02))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r cpir_measures_theil_s}
+plot_measure_smoothed(data = cpi_region_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index", 
+                      factor_list = cpi_region_list,
+                      y_lims = c(.14, .34),
+                      y_seqs = seq(.14, .34, .02))
+
+```
+
+##### With Errors
+``` {r cpir_measures_theil_e}
+plot_measure_errors(data = cpi_region_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index", 
+                    factor_list = cpi_region_list,
+                    y_lims = c(0.07, 0.67),
+                      y_seqs = seq(0.07, 0.67, .05))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r cpir_measures_8020_s}
+plot_measure_smoothed(data = cpi_region_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio", 
+                      factor_list = cpi_region_list,
+                      y_lims = c(2.3, 4.1),
+                      y_seqs = seq(2.3, 4.1, .1))
+
+```
+
+##### With Errors
+``` {r cpir_measures_8020_e}
+plot_measure_errors(data = cpi_region_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio", 
+                    factor_list = cpi_region_list,
+                                        y_lims = c(2, 5.2),
+                      y_seqs = seq(2, 5.2, .4))
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r cpir_measures_9010_s}
+plot_measure_smoothed(data = cpi_region_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio", 
+                      factor_list = cpi_region_list,
+                                          y_lims = c(3, 11),
+                      y_seqs = seq(3, 11, .5))
+
+```
+
+##### With Errors
+``` {r cpir_measures_9010_e}
+plot_measure_errors(data = cpi_region_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio", 
+                    factor_list = cpi_region_list,
+                    y_lims = NULL,
+                      y_seqs = waiver())
+```
+
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r cpir_measures_mean_s}
+plot_measure_smoothed(data = cpi_region_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI", 
+                      factor_list = cpi_region_list,
+                      y_lims = c(28000, 63000),
+                      y_seqs = seq(28000, 63000, 5000))
+
+```
+
+##### With Errors
+``` {r cpir_measures_mean_e}
+plot_measure_errors(data = cpi_region_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI", 
+                    factor_list = cpi_region_list, 
+                    y_lims = c(24000, 69000),
+                      y_seqs = seq(24000, 69000, 5000))
+```
+
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r cpir_measures_median_s}
+plot_measure_smoothed(data = cpi_region_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI", 
+                      factor_list = cpi_region_list,
+                                          y_lims = c(22000, 57000),
+                      y_seqs = seq(22000, 57000, 5000))
+
+```
+
+##### With Errors
+``` {r cpir_measures_median_e}
+plot_measure_errors(data = cpi_region_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI", 
+                    factor_list = cpi_region_list,
+                                          y_lims = c(20000, 60000),
+                      y_seqs = seq(20000, 60000, 5000))
+```
+
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r cpir_measures_total_s}
+plot_measure_smoothed(data = cpi_region_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI across individuals", 
+                      factor_list = cpi_region_list,
+                                          y_lims = c(1*10**10, 1*10**11),
+                      y_seqs = seq(1*10**10, 1*10**11, 1*10**10))
+
+```
+
+##### With Errors
+``` {r cpir_measures_total_e}
+plot_measure_errors(data = cpi_region_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI across individuals", 
+                    factor_list = cpi_region_list,
+                                          y_lims = c(.5*10**10, 1.05*10**11),
+                      y_seqs = seq(.5*10**10, 1.05*10**11, 1*10**10))
+```
+
+### Income and Population Shares
+
+``` {r incpop_cpir_bhc}
+plot_both_shares(data = cpi_region_table, ylim_max = 0.4, factor_list = cpi_region_list)
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_cpir}
+plot_area_stacked(data = cpi_region_table, subgroup_type = "all regions", between_name = "Between regions", factor_list = c(cpi_region_list, "Between regions"), ylim_max = 0.35, change_max = 0.03)
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_cpir}
+theil_breakdown(data = cpi_region_table, group_type = "region", factor_list = cpi_region_list, ylim = 0.08)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_cpir}
+theil_breakdown_errors(data = cpi_region_table, group_type = "region", factor_list = cpi_region_list, ylim = 0.10)
+```
+
+## Output Regions
+
+### Measures {.tabset}
+
+#### Gini {.tabset}
+
+##### Standard
+``` {r or_measures_gini_s}
+plot_measure_smoothed(data = output_region_table, 
+                      selected_variable = "Gini", 
+                      plot_title ="Gini coefficient", 
+                      factor_list = output_region_list,
+                      y_lims = c(0.26, .44),
+                      y_seqs = seq(.26, .44, 0.02))
+
+```
+
+##### With Errors
+``` {r or_measures_gini_e}
+plot_measure_errors(data = output_region_table, 
+                    selected_variable = "Gini", 
+                    plot_title ="Gini coefficient", 
+                    factor_list = output_region_list,
+                      y_lims = c(.16, .6),
+                      y_seqs = seq(.16, .6, .04))
+```
+
+#### Theil {.tabset}
+
+##### Standard
+``` {r or_measures_theil_s}
+plot_measure_smoothed(data = output_region_table, 
+                      selected_variable = "Theil", 
+                      plot_title ="Theil index", 
+                      factor_list = output_region_list,
+                      y_lims = c(0.11, 0.44),
+                      y_seqs = seq(0.11, 0.44, 0.03))
+
+```
+
+##### With Errors
+``` {r or_measures_theil_e}
+plot_measure_errors(data = output_region_table, 
+                    selected_variable = "Theil", 
+                    plot_title ="Theil index", 
+                    factor_list = output_region_list,
+                      y_lims = c(-.1, 1.2),
+                      y_seqs = seq(-.1, 1.2, .1))
+```
+
+#### 80/20 Ratio {.tabset}
+
+##### Standard
+``` {r or_measures_8020_s}
+plot_measure_smoothed(data = output_region_table, 
+                      selected_variable = "80/20 Ratio", 
+                      plot_title ="80/20 ratio", 
+                      factor_list = output_region_list,
+                      y_lims = c(2.1, 4.1),
+                      y_seqs = seq(2.1, 4.1, .2))
+
+```
+
+##### With Errors
+``` {r or_measures_8020_e}
+plot_measure_errors(data = output_region_table, 
+                    selected_variable = "80/20 Ratio", 
+                    plot_title ="80/20 ratio", 
+                    factor_list = output_region_list,
+                      y_lims = NULL,
+                      y_seqs = waiver())
+```
+
+#### 90/10 Ratio {.tabset}
+
+##### Standard
+``` {r or_measures_9010_s}
+plot_measure_smoothed(data = output_region_table, 
+                      selected_variable = "90/10 Ratio", 
+                      plot_title ="90/10 ratio", 
+                      factor_list = output_region_list,
+                      y_lims = NULL,
+                      y_seqs = waiver())
+
+```
+
+##### With Errors
+``` {r or_measures_9010_e}
+plot_measure_errors(data = output_region_table, 
+                    selected_variable = "90/10 Ratio", 
+                    plot_title ="90/10 ratio", 
+                    factor_list = output_region_list,
+                    y_lims = NULL,
+                      y_seqs = waiver())
+```
+
+
+#### Mean Income {.tabset}
+
+##### Standard
+``` {r or_measures_mean_s}
+plot_measure_smoothed(data = output_region_table, 
+                      selected_variable = "Mean", 
+                      plot_title ="Mean HEDI", 
+                      factor_list = output_region_list,
+                      y_lims = c(24000, 64000),
+                      y_seqs = seq(24000, 64000, 5000))
+
+```
+
+##### With Errors
+``` {r or_measures_mean_e}
+plot_measure_errors(data = output_region_table, 
+                    selected_variable = "Mean", 
+                    plot_title ="Mean HEDI", 
+                    factor_list = output_region_list,
+                      y_lims = c(18000, 73000),
+                      y_seqs = seq(18000, 73000, 5000))
+```
+
+
+#### Median Income {.tabset}
+
+##### Standard
+``` {r or_measures_median_s}
+plot_measure_smoothed(data = output_region_table, 
+                      selected_variable = "Median", 
+                      plot_title ="Median HEDI", 
+                      factor_list = output_region_list,
+                      y_lims = c(20000, 55000),
+                      y_seqs = seq(20000, 55000, 5000))
+
+```
+
+##### With Errors
+``` {r or_measures_median_e}
+plot_measure_errors(data = output_region_table, 
+                    selected_variable = "Median", 
+                    plot_title ="Median HEDI", 
+                    factor_list = output_region_list,
+                      y_lims = c(9000, 59000),
+                      y_seqs = seq(9000, 59000, 5000))
+```
+
+#### Total Income {.tabset}
+
+##### Standard
+``` {r or_measures_total_s}
+plot_measure_smoothed(data = output_region_table, 
+                      selected_variable = "Total", 
+                      plot_title ="Total HEDI across individuals", 
+                      factor_list = output_region_list,
+                      y_lims = c(0, 1*10**11),
+                      y_seqs = seq(0, 1*10**11, 1*10**10))
+
+```
+
+##### With Errors
+``` {r or_measures_total_e}
+plot_measure_errors(data = output_region_table, 
+                    selected_variable = "Total", 
+                    plot_title ="Total HEDI across individuals", 
+                    factor_list = output_region_list,
+                      y_lims = c(0, 1.1*10**11),
+                      y_seqs = seq(0, 1.1*10**11, 1*10**10))
+```
+
+### Income and Population Shares
+
+``` {r incpop_or_bhc}
+plot_both_shares(data = output_region_table, 
+                 ylim_max = 0.4, 
+                 factor_list = output_region_list)
+```
+
+### Theil {.tabset}
+
+#### Contribution
+``` {r theil_contribution_or}
+plot_area_stacked(data = output_region_table, subgroup_type = "all regions", between_name = "Between regions", factor_list = c(output_region_list, "Between regions"), ylim_max = 0.35, change_max = 0.03)
+```
+
+#### Breakdown {.tabset}
+
+##### Standard
+``` {r theil_breakdown_or}
+theil_breakdown(data = output_region_table, group_type = "region", factor_list = output_region_list, ylim = 0.08)
+```
+
+##### With Errors
+``` {r theil_breakdown_errors_or}
+theil_breakdown_errors(data = output_region_table, group_type = "region", factor_list = output_region_list, ylim = 0.1)
+```
+
+
