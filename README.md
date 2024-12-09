@@ -4,7 +4,7 @@ This repository contains a technical report that provides plots and statistical 
 https://www.treasury.govt.nz/publications/an/an-24-10
 
 The technical report can be viewed here:
-https://github.com/Treasury-Analytics-and-Insights/analytical-note-24-10-income-inequality-trends
+https://treasury-analytics-and-insights.github.io/analytical-note-24-10-income-inequality-trends/analytical-note-24-10-income-inequality-trends.html
 
 Staff and teams are writing in their individual capacity and the views are not necessarily a “Treasury” view. Please read our disclaimer:
 https://www.treasury.govt.nz/publications/research-and-commentary/other-paper-series-and-details/disclaimer-research-and-commentary-publications
